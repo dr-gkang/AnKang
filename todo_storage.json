@@ -1,19 +1,4 @@
 {
-  "active": [
-    {
-      "id": "4ab873ca4e9f4dc48fe44db488b4b5af",
-      "deck": "AnKing Step Deck",
-      "due_date": "2026-04-13",
-      "due_time": "01:00",
-      "completed": false
-    },
-    {
-      "id": "8b4235c288024a909de844adcac103c7",
-      "deck": "AnKing Step Deck::Instructions",
-      "due_date": "2026-05-16",
-      "due_time": "01:45",
-      "completed": false
-    }
-  ],
+  "active": [],
   "archived": []
 }
