@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from aqt import mw
 from aqt.qt import *
@@ -327,7 +329,7 @@ def setup_ankang_ui():
     for delay_ms in (0, 100, 500):
         QTimer.singleShot(delay_ms, _ankang_inject_toolbar_reopen_row)
 
-def _anki_note_and_card_ids_for_webview(webview) -> tuple[int | None, int | None]:
+def _anki_note_and_card_ids_for_webview(webview):
     """If the webview is the reviewer card area, return (note id, card id) for Browser search."""
     r = getattr(mw, "reviewer", None)
     if not r or getattr(r, "web", None) is not webview:

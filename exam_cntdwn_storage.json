@@ -1,8 +1,17 @@
 {
   "slots": [
-    null,
-    null,
-    null
+    {
+      "when": "2026-04-24T09:00:00",
+      "name": "Neuro Exam 2"
+    },
+    {
+      "when": "2026-06-06T09:00:00",
+      "name": "COMLEX Level 1"
+    },
+    {
+      "when": "2026-06-20T09:00:00",
+      "name": "USMLE Step 1"
+    }
   ],
-  "current_slot": 0
+  "current_slot": 2
 }
