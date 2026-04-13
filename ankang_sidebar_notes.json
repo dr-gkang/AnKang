@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "books": {
+    "Block/System": {
+      "Exam/Concept": [
+        {
+          "id": "c90cd0599a1742338609c0e420a5f1a4",
+          "title": "AnKang Notes Help",
+          "body": "Make Books for different Blocks or Organ Systems.\nMake Chapters for different Exams or Concepts.\nMake Notes for a fact or something inside that piece of info.\nOr do something completely different!\n\nYou can also link specific Anki Cards to different notes by highlighting and right clicking text on an anki card.\n\nAnKang Notes is still a little buggy, make sure to not save anything too important that you're scared to lose.\nWill EVENTUALLY update AnKang Notes with more features!"
+        }
+      ]
+    }
+  }
+}
