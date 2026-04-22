@@ -821,7 +821,7 @@ class AnkangRightSidebar(QDockWidget):
         ctx = self._reviewer_answer_card_context()
         if ctx is None:
             return
-        self.paste_prompt_into_ai_chat(f"Simplify this Anki Card:\n\n{ctx}")
+        self.paste_prompt_into_ai_chat(f"Give me a quick, short simplified explanation of this Anki Card:\n\n{ctx}")
 
     def _ai_action_usmle_question(self) -> None:
         ctx = self._reviewer_answer_card_context()
