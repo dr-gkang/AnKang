@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# User data (lives under Anki profile, not the add-on package)
+# (If you ever add local test JSONs, they stay untracked)
+todo_storage.json
+exam_cntdwn_storage.json
+ankang_sidebar_notes.json
+ankang_sidebar_notes.txt
+ankang_exam_countdown.json
