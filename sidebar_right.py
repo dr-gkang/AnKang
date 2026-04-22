@@ -7,6 +7,10 @@ from aqt import mw, gui_hooks
 from aqt.utils import tooltip
 
 from .ankang_format_styles import ankang_text_button_stylesheet, mark_ankang_text_button
+from .ankang_profile_storage import (
+    profile_r_sidebar_qtwebengine_dir,
+    profile_r_sidebar_session_path,
+)
 
 # Try to import WebEngine for the AI/Browser features
 try:
@@ -532,7 +536,7 @@ class AnkangRightSidebar(QDockWidget):
             self.web_view = QWebEngineView()
 
             if QWebEngineProfile and QWebEnginePage:
-                wdir = os.path.join(mw.pm.profileFolder(), "AnkangSidebar", "qtwebengine")
+                wdir = profile_r_sidebar_qtwebengine_dir()
                 os.makedirs(wdir, exist_ok=True)
                 self._engine_profile = QWebEngineProfile("ankang_right_sidebar", mw)
                 self._engine_profile.setPersistentStoragePath(wdir)
@@ -589,7 +593,7 @@ class AnkangRightSidebar(QDockWidget):
             self.ai_view.setUrl(QUrl("https://gemini.google.com"))
 
     def _sidebar_session_json_path(self) -> str:
-        return os.path.join(mw.pm.profileFolder(), "AnkangSidebar", "session.json")
+        return profile_r_sidebar_session_path()
 
     def _on_ai_view_url_changed(self, _url=None) -> None:
         self._debounced_persist_session()
