@@ -370,14 +370,25 @@ class TaskFormDialog(QDialog):
 
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 6, 6, 6)
-        deck_box = QGroupBox("Deck (required)")
+        deck_box = QGroupBox("Task")
         deck_lay = QVBoxLayout()
-        self._deck_search = QLineEdit()
-        self._deck_search.setPlaceholderText("Search decks…")
-        self._deck_search.textChanged.connect(self._filter_decks)
+        self._task_text = QLineEdit()
+        self._task_text.setPlaceholderText("Task title")
         self._deck_combo = QComboBox()
+        self._deck_combo.setEditable(True)
+        self._deck_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self._deck_combo.addItems(self._full_deck_list)
-        deck_lay.addWidget(self._deck_search)
+        self._deck_combo.setCurrentIndex(-1)
+        self._deck_combo.setEditText("")
+        if self._deck_combo.lineEdit() is not None:
+            self._deck_combo.lineEdit().setPlaceholderText(
+                "Optional: Select a deck for your task"
+            )
+        comp = QCompleter(self._full_deck_list, self._deck_combo)
+        comp.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        comp.setFilterMode(Qt.MatchFlag.MatchContains)
+        self._deck_combo.setCompleter(comp)
+        deck_lay.addWidget(self._task_text)
         deck_lay.addWidget(self._deck_combo)
         deck_box.setLayout(deck_lay)
         root.addWidget(deck_box)
@@ -443,6 +454,8 @@ class TaskFormDialog(QDialog):
 
         # Populate
         deck_name = initial.get("deck")
+        if deck_name:
+            self._task_text.setText(deck_name)
         if deck_name and deck_name in self._full_deck_list:
             self._deck_combo.setCurrentText(deck_name)
         elif deck_name:
@@ -477,15 +490,6 @@ class TaskFormDialog(QDialog):
         self.setFixedWidth(350)
         self.resize(350, 200)
 
-    def _filter_decks(self, text: str) -> None:
-        cur = self._deck_combo.currentText()
-        filt = [d for d in self._full_deck_list if text.lower() in d.lower()]
-        self._deck_combo.clear()
-        self._deck_combo.addItems(filt or self._full_deck_list)
-        idx = self._deck_combo.findText(cur)
-        if idx >= 0:
-            self._deck_combo.setCurrentIndex(idx)
-
     def _sync_due_controls(self) -> None:
         d_on = self._has_date.isChecked()
         self._date_edit.setEnabled(d_on)
@@ -497,17 +501,23 @@ class TaskFormDialog(QDialog):
         if not d_on:
             self._has_time.setChecked(False)
 
+    def _resolved_task_label(self) -> str:
+        typed = self._task_text.text().strip()
+        if typed:
+            return typed
+        return self._deck_combo.currentText().strip()
+
     def _on_delete_clicked(self) -> None:
         if askUser("Delete this task permanently?"):
             self._deletion_requested = True
             self.accept()
 
     def _on_ok(self) -> None:
-        deck = self._deck_combo.currentText().strip()
-        if not deck or deck not in mw.col.decks.all_names():
+        task = self._resolved_task_label()
+        if not task:
             from aqt.utils import showWarning
 
-            showWarning("Please choose a valid deck.")
+            showWarning("Please enter a task title.")
             return
         self.accept()
 
@@ -515,7 +525,7 @@ class TaskFormDialog(QDialog):
         return self._deletion_requested
 
     def build_payload(self) -> dict:
-        deck = self._deck_combo.currentText().strip()
+        deck = self._resolved_task_label()
         due_date = None
         due_time = None
         if self._has_date.isChecked():
