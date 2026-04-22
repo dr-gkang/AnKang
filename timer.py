@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import os
 import time
 
 from aqt import mw
 from aqt.qt import *
+
+from .ankang_profile_storage import profile_data_file
 
 
 def _format_since_complete_hms(total_seconds: int) -> str:
@@ -27,7 +30,7 @@ class TimerCompleteDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(12)
-        msg = QLabel("Congratulations! Timer is complete!")
+        msg = QLabel("Timer is complete!")
         msg.setWordWrap(True)
         msg.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         root.addWidget(msg)
@@ -93,7 +96,30 @@ class IconSwapButton(QToolButton):
         self.setIcon(self._icon_active if self.underMouse() else self._icon_normal)
         return super().mouseReleaseEvent(event)
 
-_TIMER_DURATION_MINUTES = (5, 10, 15, 25, 30, 50, 60)
+_COMMON_PRESETS: tuple[tuple[str, int], ...] = (
+    ("5m", 5),
+    ("10m", 10),
+    ("15m", 15),
+    ("45m", 45),
+    ("1h", 60),
+)
+
+_POMODORO_PRESETS: tuple[tuple[str, int], ...] = (
+    ("Work: 25m", 25),
+    ("Break: 5m", 5),
+    ("Long Work: 50m", 50),
+    ("Long Break: 10m", 10),
+)
+
+_EXAM_PRESETS: tuple[tuple[str, int, str], ...] = (
+    ("30m - USMLE Step 1 Block (20q)", 30, "1.5m/q"),
+    ("60m - COMLEX Level 1 Block (40q)", 60, "1.5m/q"),
+    ("1h 15m - NBME CBSE Block (50q)", 75, "1.5m/q"),
+    ("1h 35m - MCAT Block (59q)", 95, "~1.6m/q"),
+)
+
+_TIMER_STORAGE_FILENAME = "timer_storage.json"
+_DEFAULT_TIMER_MINUTES = 25
 
 
 class TimerWidget(QWidget):
@@ -114,7 +140,7 @@ class TimerWidget(QWidget):
         self.heading_label.setStyleSheet("color: #000000; font-weight: 700; font-size: 12px;")
         layout.addWidget(self.heading_label)
 
-        self.time_label = QLabel("25:00")
+        self.time_label = QLabel("00:25:00")
         self.time_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.time_label.setStyleSheet("color: #000000; font-weight: 800; font-size: 16px;")
         layout.addWidget(self.time_label)
@@ -184,12 +210,37 @@ class TimerWidget(QWidget):
 
         self._tick = QTimer(self)
         self._tick.timeout.connect(self._on_tick)
-        self._duration_seconds = 25 * 60
+        self._duration_seconds = self._load_saved_duration_seconds()
         self._remaining_seconds = self._duration_seconds
         self._render_time()
         self.is_running = False
         self._sync_buttons()
         self.set_text_color("#000000")
+
+    def _timer_storage_path(self) -> str:
+        return profile_data_file(_TIMER_STORAGE_FILENAME)
+
+    def _load_saved_duration_seconds(self) -> int:
+        default_seconds = _DEFAULT_TIMER_MINUTES * 60
+        try:
+            with open(self._timer_storage_path(), "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError, TypeError):
+            return default_seconds
+        minutes = data.get("duration_minutes")
+        try:
+            minutes_i = int(minutes)
+        except (TypeError, ValueError):
+            return default_seconds
+        return max(1, minutes_i) * 60
+
+    def _save_duration_minutes(self, minutes: int) -> None:
+        payload = {"duration_minutes": max(1, int(minutes))}
+        try:
+            with open(self._timer_storage_path(), "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=True, indent=2)
+        except OSError:
+            return
 
     def _open_completion_dialog(self) -> None:
         TimerCompleteDialog(self).exec()
@@ -218,10 +269,75 @@ class TimerWidget(QWidget):
         dark = self.palette().color(QPalette.ColorRole.Window).lightness() < 128
         fg = "#ffffff" if dark else "#000000"
         bg = "#3a3a3a" if dark else "#f3f3f3"
-        menu.setStyleSheet(f"QMenu {{ background-color: {bg}; color: {fg}; border: 1px solid #5DA9DF; }}")
-        for minutes in _TIMER_DURATION_MINUTES:
-            act = menu.addAction(f"{minutes}m")
+        menu.setStyleSheet(
+            f"QMenu {{ background-color: {bg}; color: {fg}; border: 1px solid #5DA9DF; }}"
+        )
+
+        common_menu = menu.addMenu("Common Presets")
+        for label, minutes in _COMMON_PRESETS:
+            act = common_menu.addAction(label)
             act.setData(minutes)
+
+        pomodoro_menu = menu.addMenu("Pomodoro Presets")
+        act = pomodoro_menu.addAction(_POMODORO_PRESETS[0][0])
+        act.setData(_POMODORO_PRESETS[0][1])
+        act = pomodoro_menu.addAction(_POMODORO_PRESETS[1][0])
+        act.setData(_POMODORO_PRESETS[1][1])
+        pomodoro_menu.addSeparator()
+        act = pomodoro_menu.addAction(_POMODORO_PRESETS[2][0])
+        act.setData(_POMODORO_PRESETS[2][1])
+        act = pomodoro_menu.addAction(_POMODORO_PRESETS[3][0])
+        act.setData(_POMODORO_PRESETS[3][1])
+
+        exam_menu = menu.addMenu("Exam Presets")
+        exam_menu.setToolTipsVisible(True)
+        for label, minutes, tooltip in _EXAM_PRESETS:
+            act = exam_menu.addAction(label)
+            act.setToolTip(tooltip)
+            act.setData(minutes)
+
+        custom_menu = menu.addMenu("Custom")
+        custom_widget = QWidget(custom_menu)
+        custom_layout = QHBoxLayout(custom_widget)
+        custom_layout.setContentsMargins(8, 4, 8, 4)
+        custom_layout.setSpacing(6)
+
+        hours_input = QLineEdit(custom_widget)
+        hours_input.setPlaceholderText("hh")
+        hours_input.setValidator(QIntValidator(0, 23, hours_input))
+        hours_input.setMaxLength(2)
+        hours_input.setFixedWidth(36)
+
+        mins_input = QLineEdit(custom_widget)
+        mins_input.setPlaceholderText("mm")
+        mins_input.setValidator(QIntValidator(0, 59, mins_input))
+        mins_input.setMaxLength(2)
+        mins_input.setFixedWidth(36)
+        sep_lbl = QLabel(":", custom_widget)
+        sep_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sep_lbl.setFixedWidth(8)
+
+        apply_btn = QPushButton("Apply", custom_widget)
+        apply_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        custom_layout.addWidget(hours_input)
+        custom_layout.addWidget(sep_lbl)
+        custom_layout.addWidget(mins_input)
+        custom_layout.addWidget(apply_btn)
+
+        custom_action = QWidgetAction(custom_menu)
+        custom_action.setDefaultWidget(custom_widget)
+        custom_menu.addAction(custom_action)
+
+        def apply_custom_duration() -> None:
+            hours = int(hours_input.text()) if hours_input.text() else 0
+            mins = int(mins_input.text()) if mins_input.text() else 0
+            total_minutes = (hours * 60) + mins
+            self._set_duration_minutes(max(1, total_minutes))
+            menu.close()
+
+        apply_btn.clicked.connect(apply_custom_duration)
+
         chosen = menu.exec(QCursor.pos())
         if chosen is None:
             return
@@ -263,12 +379,15 @@ class TimerWidget(QWidget):
         self._render_time()
 
     def _render_time(self):
-        m = self._remaining_seconds // 60
+        h = self._remaining_seconds // 3600
+        m = (self._remaining_seconds % 3600) // 60
         s = self._remaining_seconds % 60
-        self.time_label.setText(f"{m:02d}:{s:02d}")
+        self.time_label.setText(f"{h:02d}:{m:02d}:{s:02d}")
 
     def _set_duration_minutes(self, minutes: int):
-        self._duration_seconds = max(1, minutes) * 60
+        safe_minutes = max(1, int(minutes))
+        self._duration_seconds = safe_minutes * 60
+        self._save_duration_minutes(safe_minutes)
         self.reset_timer()
 
     def _sync_buttons(self):
