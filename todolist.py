@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from html import escape as html_escape
 from datetime import date, datetime, timedelta, time as dtime
 
 from aqt.qt import *
@@ -179,13 +180,11 @@ def _active_sort_key(item: dict) -> tuple:
         return (3, deck)
     due_date = item.get("due_date")
     due_time = item.get("due_time")
-    if due_date and due_time:
+    if due_date:
         dt = _parse_due_datetime(due_date, due_time)
         ts = dt.timestamp() if dt else float("inf")
         return (0, ts, deck)
-    if due_date:
-        return (1, deck)
-    return (2, deck)
+    return (1, deck)
 
 
 def _countdown_parts(now: datetime, target: datetime) -> tuple[int, int, int]:
@@ -214,11 +213,14 @@ def _deck_color_stylesheet(color: str, strikethrough: bool) -> str:
     return f"color: {color}; {deco}"
 
 
-def _make_deck_title_column(deck_full: str, color: str, strikethrough: bool) -> QWidget:
-    """
-    Parent path + leaf as separate labels with correct height-for-width (no overlap on resize).
-    Font metrics use setFont (not stylesheet px) so heightForWidth matches painting.
-    """
+def _make_task_title_column(
+    task_title: str,
+    linked_deck: str | None,
+    color: str,
+    strikethrough: bool,
+    on_open_deck: callable | None = None,
+) -> QWidget:
+    """Task title plus optional linked full deck path under it."""
     col = QWidget()
     v = QVBoxLayout(col)
     v.setContentsMargins(0, 0, 0, 0)
@@ -227,30 +229,33 @@ def _make_deck_title_column(deck_full: str, color: str, strikethrough: bool) -> 
     col.setMinimumWidth(1)
     sheet = _deck_color_stylesheet(color, strikethrough)
 
-    if not deck_full.strip():
+    if not task_title.strip():
         empty = QLabel("")
         empty.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         v.addWidget(empty)
         return col
 
-    if "::" not in deck_full:
-        leaf = _WrappedDeckLabel(deck_full)
-        leaf.setFont(_deck_font(_DECK_FONT_CHILD_PX, True))
-        leaf.setStyleSheet(sheet)
-        v.addWidget(leaf)
-        return col
+    title_lbl = _WrappedDeckLabel(task_title)
+    title_lbl.setFont(_deck_font(_DECK_FONT_CHILD_PX, True))
+    title_lbl.setStyleSheet(sheet)
+    v.addWidget(title_lbl)
 
-    parent, _sep, child = deck_full.rpartition("::")
-    p_lbl = _WrappedDeckLabel(parent + "::")
-    p_lbl.setFont(_deck_font(_DECK_FONT_PARENT_PX, False))
-    p_lbl.setStyleSheet(sheet)
+    if linked_deck:
+        link = QLabel(
+            f'<a href="{html_escape(linked_deck)}">{html_escape(linked_deck)}</a>'
+        )
+        link.setTextFormat(Qt.TextFormat.RichText)
+        link.setWordWrap(True)
+        link.setOpenExternalLinks(False)
+        link.setTextInteractionFlags(Qt.TextInteractionFlag.LinksAccessibleByMouse)
+        link.setFont(_deck_font(max(9, _DECK_FONT_PARENT_PX - 1), False))
+        link_color = "#9ecbff" if not strikethrough else "#777777"
+        link.setStyleSheet(f"color: {link_color};")
+        link.setToolTip("Open this deck in Review")
+        if on_open_deck is not None:
+            link.linkActivated.connect(lambda _=None, d=linked_deck: on_open_deck(d))
+        v.addWidget(link)
 
-    c_lbl = _WrappedDeckLabel(child)
-    c_lbl.setFont(_deck_font(_DECK_FONT_CHILD_PX, True))
-    c_lbl.setStyleSheet(sheet)
-
-    v.addWidget(p_lbl)
-    v.addWidget(c_lbl)
     return col
 
 
@@ -311,6 +316,7 @@ def _migrate_legacy_item(raw: dict, col) -> dict | None:
     return {
         "id": raw.get("id") or uuid.uuid4().hex,
         "deck": deck,
+        "linked_deck": None,
         "due_date": raw.get("due_date"),
         "due_time": raw.get("due_time"),
         "completed": bool(raw.get("completed", False)),
@@ -328,9 +334,13 @@ def _normalize_item(raw: dict, col) -> dict | None:
     deck = raw.get("deck")
     if not deck or not isinstance(deck, str):
         return None
+    linked_deck = raw.get("linked_deck")
+    if not isinstance(linked_deck, str) or not linked_deck.strip():
+        linked_deck = None
     return {
         "id": raw.get("id") or uuid.uuid4().hex,
         "deck": deck,
+        "linked_deck": linked_deck,
         "due_date": raw.get("due_date") if raw.get("due_date") else None,
         "due_time": raw.get("due_time") if raw.get("due_time") else None,
         "completed": bool(raw.get("completed", False)),
@@ -360,6 +370,7 @@ class TaskFormDialog(QDialog):
         edit_mode: bool = False,
     ):
         super().__init__(parent or mw)
+        self.setWindowModality(Qt.WindowModality.WindowModal)
         self.setWindowTitle("Edit Task" if edit_mode else "Add New Task")
         self._edit_mode = edit_mode
         self._deletion_requested = False
@@ -390,6 +401,13 @@ class TaskFormDialog(QDialog):
         self._deck_combo.setCompleter(comp)
         deck_lay.addWidget(self._task_text)
         deck_lay.addWidget(self._deck_combo)
+        self._deck_name_hint = QLabel(
+            "If a Task title is not selected, the deck name will be used."
+        )
+        self._deck_name_hint.setWordWrap(True)
+        self._deck_name_hint.setStyleSheet("color: #888888; font-size: 11px;")
+        self._deck_name_hint.setVisible(not edit_mode)
+        deck_lay.addWidget(self._deck_name_hint)
         deck_box.setLayout(deck_lay)
         root.addWidget(deck_box)
 
@@ -426,6 +444,12 @@ class TaskFormDialog(QDialog):
         time_row.addWidget(self._min_combo, 1)
         time_row.addWidget(self._ampm_combo, 1)
         due_outer.addLayout(time_row)
+        self._due_time_hint = QLabel(
+            "If due date is set but no due time, task will be due at 11:59pm"
+        )
+        self._due_time_hint.setWordWrap(True)
+        self._due_time_hint.setStyleSheet("color: #888888; font-size: 11px;")
+        due_outer.addWidget(self._due_time_hint)
         due_box.setLayout(due_outer)
         root.addWidget(due_box)
 
@@ -453,14 +477,18 @@ class TaskFormDialog(QDialog):
         self.setStyleSheet(ankang_text_button_stylesheet())
 
         # Populate
-        deck_name = initial.get("deck")
-        if deck_name:
-            self._task_text.setText(deck_name)
-        if deck_name and deck_name in self._full_deck_list:
-            self._deck_combo.setCurrentText(deck_name)
-        elif deck_name:
-            self._deck_combo.insertItem(0, deck_name)
+        task_title = initial.get("deck")
+        linked_deck = initial.get("linked_deck")
+        if task_title:
+            self._task_text.setText(task_title)
+        if linked_deck and linked_deck in self._full_deck_list:
+            self._deck_combo.setCurrentText(linked_deck)
+        elif linked_deck:
+            self._deck_combo.insertItem(0, linked_deck)
             self._deck_combo.setCurrentIndex(0)
+        elif task_title and task_title in self._full_deck_list:
+            # Backward compatibility for old entries where deck/title were conflated.
+            self._deck_combo.setCurrentText(task_title)
 
         dd = initial.get("due_date")
         tm = initial.get("due_time")
@@ -505,7 +533,10 @@ class TaskFormDialog(QDialog):
         typed = self._task_text.text().strip()
         if typed:
             return typed
-        return self._deck_combo.currentText().strip()
+        deck_text = self._deck_combo.currentText().strip()
+        if "::" in deck_text:
+            return deck_text.rsplit("::", 1)[-1].strip()
+        return deck_text
 
     def _on_delete_clicked(self) -> None:
         if askUser("Delete this task permanently?"):
@@ -526,6 +557,7 @@ class TaskFormDialog(QDialog):
 
     def build_payload(self) -> dict:
         deck = self._resolved_task_label()
+        linked_deck = self._deck_combo.currentText().strip() or None
         due_date = None
         due_time = None
         if self._has_date.isChecked():
@@ -538,6 +570,7 @@ class TaskFormDialog(QDialog):
                 )
         return {
             "deck": deck,
+            "linked_deck": linked_deck,
             "due_date": due_date,
             "due_time": due_time,
         }
@@ -545,8 +578,24 @@ class TaskFormDialog(QDialog):
 
 class TodoDialog(QDialog):
     def __init__(self, parent=None):
-        super().__init__(mw)
+        # Top-level: no Qt parent, so the OS can show it as a separate taskbar / dock item.
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.setWindowModality(Qt.WindowModality.NonModal)
+        self.setWindowFlag(Qt.WindowType.WindowMinimizeButtonHint, True)
+        self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, True)
         self.setWindowTitle("AnKang To-Do List")
+        try:
+            app = QApplication.instance()
+            icon = None
+            if app is not None:
+                icon = app.windowIcon()
+            if (icon is None or icon.isNull()) and mw is not None:
+                icon = mw.windowIcon()
+            if icon is not None and not icon.isNull():
+                self.setWindowIcon(icon)
+        except Exception:
+            pass
         self.resize(420, 620)
         self.setMinimumSize(280, 360)
 
@@ -652,6 +701,7 @@ class TodoDialog(QDialog):
             {
                 "id": uuid.uuid4().hex,
                 "deck": p["deck"],
+                "linked_deck": p.get("linked_deck"),
                 "due_date": p["due_date"],
                 "due_time": p["due_time"],
                 "completed": False,
@@ -689,6 +739,27 @@ class TodoDialog(QDialog):
                 return t
         return None
 
+    def _open_linked_deck_review(self, deck_name: str) -> None:
+        if not deck_name or not mw.col:
+            return
+        deck = mw.col.decks.by_name(deck_name)
+        if not deck:
+            from aqt.utils import showWarning
+
+            showWarning(f"Deck not found:\n{deck_name}")
+            return
+        try:
+            did = int(deck["id"]) if isinstance(deck, dict) else int(deck.id)
+            mw.col.decks.select(did)
+            mw.moveToState("overview")
+            overview = getattr(mw, "overview", None)
+            if overview and hasattr(overview, "onStudyKey"):
+                overview.onStudyKey()
+        except Exception:
+            from aqt.utils import showWarning
+
+            showWarning(f"Could not open deck for review:\n{deck_name}")
+
     def _toggle_completed(self, task_id: str) -> None:
         item = self._find_active_by_id(task_id)
         if not item:
@@ -705,6 +776,7 @@ class TodoDialog(QDialog):
         arch = {
             "id": item.get("id") or uuid.uuid4().hex,
             "deck": item["deck"],
+            "linked_deck": item.get("linked_deck"),
             "due_date": item.get("due_date"),
             "due_time": item.get("due_time"),
             "completed": True,
@@ -763,8 +835,15 @@ class TodoDialog(QDialog):
             complete_btn.clicked.connect(lambda *_, tid=tid: self._toggle_completed(tid))
 
             deck_color, cd_text, cd_tip = _task_row_style(now, item)
-            deck_name = item.get("deck") or ""
-            deck_col = _make_deck_title_column(deck_name, deck_color, done)
+            task_title = item.get("deck") or ""
+            linked_deck = item.get("linked_deck")
+            deck_col = _make_task_title_column(
+                task_title,
+                linked_deck,
+                deck_color,
+                done,
+                on_open_deck=self._open_linked_deck_review,
+            )
 
             cd_lbl = QLabel(cd_text)
             cd_lbl.setWordWrap(False)
@@ -942,6 +1021,8 @@ class TodoDialog(QDialog):
 class TodoWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._todo_dialog: TodoDialog | None = None
+        self.save_file = profile_data_file("todo_storage.json")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         addon_path = os.path.dirname(__file__)
@@ -955,16 +1036,87 @@ class TodoWidget(QWidget):
                 icon_normal,
                 icon_active,
                 icon_size=QSize(56, 56),
-                tooltip="To-do List",
+                tooltip=self._build_tooltip_text(),
                 parent=self,
             )
             self.btn.setFixedSize(64, 64)
-            self.btn.clicked.connect(lambda: TodoDialog(self).exec())
+            self.btn.clicked.connect(self._open_todo_dialog)
             layout.addWidget(self.btn, alignment=Qt.AlignmentFlag.AlignHCenter)
         else:
             self.btn = QPushButton("TODO")
-            self.btn.setToolTip("To-do List")
+            self.btn.setToolTip(self._build_tooltip_text())
             self.btn.setFixedSize(50, 42)
-            self.btn.clicked.connect(lambda: TodoDialog(self).exec())
+            self.btn.clicked.connect(self._open_todo_dialog)
             mark_ankang_text_button(self.btn)
             layout.addWidget(self.btn)
+
+    def _open_todo_dialog(self) -> None:
+        self.btn.setToolTip(self._build_tooltip_text())
+        if self._todo_dialog is None:
+            self._todo_dialog = TodoDialog(None)
+            self._todo_dialog.destroyed.connect(self._on_todo_dialog_closed)
+        self._todo_dialog.show()
+        self._todo_dialog.raise_()
+        self._todo_dialog.activateWindow()
+
+    def _on_todo_dialog_closed(self) -> None:
+        self._todo_dialog = None
+        self.btn.setToolTip(self._build_tooltip_text())
+
+    def _build_tooltip_text(self) -> str:
+        tasks = self._load_active_tasks_for_tooltip()
+        tooltip_rows: list[tuple[str, str]] = []
+        now = datetime.now()
+
+        for item in tasks:
+            title = (item.get("deck") or "").strip()
+            if not title:
+                continue
+            due_dt = _parse_due_datetime(item.get("due_date"), item.get("due_time"))
+            if due_dt is None:
+                due_text = "No due date"
+            else:
+                remaining_seconds_raw = int((due_dt - now).total_seconds())
+                if remaining_seconds_raw < 0:
+                    due_text = "OVERDUE"
+                elif remaining_seconds_raw < 24 * 60 * 60:
+                    remaining_seconds = remaining_seconds_raw
+                    hours, rem = divmod(remaining_seconds, 3600)
+                    minutes = rem // 60
+                    due_text = f"Due in {hours}h {minutes}m"
+                else:
+                    days_until = max(0, (due_dt.date() - now.date()).days)
+                    due_text = f"Due in {days_until}d"
+            tooltip_rows.append((title, due_text))
+
+        lines = ["AnKang To-Do List:", ""]
+        if not tooltip_rows:
+            lines.append("No tasks. Add one now!")
+            return "\n".join(lines)
+
+        for title, due_text in tooltip_rows[:5]:
+            lines.append(f"{title} - {due_text}")
+        return "\n".join(lines)
+
+    def _load_active_tasks_for_tooltip(self) -> list[dict]:
+        if not os.path.exists(self.save_file):
+            return []
+        try:
+            with open(self.save_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return []
+        if not isinstance(data, dict):
+            return []
+        active = data.get("active", [])
+        if not isinstance(active, list):
+            return []
+        out: list[dict] = []
+        for item in active:
+            if not isinstance(item, dict):
+                continue
+            if item.get("completed"):
+                continue
+            out.append(item)
+        out.sort(key=_active_sort_key)
+        return out
