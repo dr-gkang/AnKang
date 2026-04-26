@@ -31,11 +31,21 @@ _AI_PROVIDER_URLS: tuple[str, ...] = (
     "https://gemini.google.com",
     "https://claude.ai/new",
 )
+_AI_PROVIDER_MAP: dict[str, str] = {
+    "ChatGPT": "https://chat.openai.com",
+    "Gemini": "https://gemini.google.com",
+    "Claude": "https://claude.ai/new",
+}
 
 _ANKANG_CTRL_STRIP_HEIGHT = 35
 
-_AI_STRIP_CARD_LABELS_LONG = ("Explain Card", "Simplify Card", "Practice Ques")
-_AI_STRIP_CARD_LABELS_SHORT = ("Explain", "Simplify", "PQ")
+_AI_STRIP_CARD_LABELS_LONG = (
+    "Explain Card",
+    "Simplify Card",
+    "Practice Ques.",
+    "Custom Prompt",
+)
+_AI_STRIP_CARD_LABELS_SHORT = ("Explain", "Simplify", "PQ", "Custom")
 
 _NAV_AI_LABEL_LONG = "AI Chatbot"
 _NAV_AI_LABEL_SHORT = "AI"
@@ -233,8 +243,8 @@ class AnkangMediaHoverIconButton(QPushButton):
         self.setIcon(self._icon_pr if self.underMouse() else self._icon_up)
 
 
-class AnkangAiPuzzleToggleButton(AnkangMediaHoverIconButton):
-    """AI-tab puzzle: switches Gemini / ChatGPT."""
+class AnkangAiConfigButton(AnkangMediaHoverIconButton):
+    """AI-tab config button for selecting AI provider."""
 
     def __init__(
         self,
@@ -343,6 +353,7 @@ class AnkangRightSidebar(QDockWidget):
         self._nav_web_btn.clicked.connect(lambda: self.switch_tab(1))
         for _tb in (self._nav_ai_btn, self._nav_web_btn):
             mark_ankang_text_button(_tb)
+        self._custom_prompt_suffix = ""
 
         nav_row = QHBoxLayout()
         nav_row.setContentsMargins(5, 0, 5, 0)
@@ -369,17 +380,17 @@ class AnkangRightSidebar(QDockWidget):
         # Short card labels first so the dock minimum width stays small until widen.
         addon_dir = os.path.dirname(__file__)
         pz_up = _resolve_media_asset(
-            addon_dir, "Buttons", "Unpressed", base_name="C_PuzzlePiece"
+            addon_dir, "Buttons", "Unpressed", base_name="C_Tool"
         )
         pz_pr = _resolve_media_asset(
-            addon_dir, "Buttons", "Pressed", base_name="CP_PuzzlePiece"
+            addon_dir, "Buttons", "Pressed", base_name="CP_Tool"
         )
         self._ai_puzzle_toggle_uses_icons = False
         if pz_up and pz_pr:
             iu = _load_icon_from_path(pz_up)
             ip = _load_icon_from_path(pz_pr)
             if not iu.isNull() and not ip.isNull():
-                self.ai_toggle_btn = AnkangAiPuzzleToggleButton(pz_up, pz_pr, ai_ctrl)
+                self.ai_toggle_btn = AnkangAiConfigButton(pz_up, pz_pr, ai_ctrl)
                 self._ai_puzzle_toggle_uses_icons = True
             else:
                 self.ai_toggle_btn = QPushButton("AI")
@@ -398,8 +409,8 @@ class AnkangRightSidebar(QDockWidget):
         self.ai_toggle_btn.setSizePolicy(
             QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
         )
-        self.ai_toggle_btn.setToolTip("Switch AI Chatbot")
-        self.ai_toggle_btn.clicked.connect(self.toggle_ai_service)
+        self.ai_toggle_btn.setToolTip("AI Config")
+        self.ai_toggle_btn.clicked.connect(self.open_ai_config_dialog)
         if not self._ai_puzzle_toggle_uses_icons:
             mark_ankang_text_button(self.ai_toggle_btn)
         ai_layout.addWidget(self.ai_toggle_btn, 0)
@@ -407,13 +418,21 @@ class AnkangRightSidebar(QDockWidget):
         self._btn_explain_card = QPushButton(_AI_STRIP_CARD_LABELS_SHORT[0])
         self._btn_simplify_card = QPushButton(_AI_STRIP_CARD_LABELS_SHORT[1])
         self._btn_usmle = QPushButton(_AI_STRIP_CARD_LABELS_SHORT[2])
+        self._btn_custom_prompt = QPushButton(_AI_STRIP_CARD_LABELS_SHORT[3])
         self._btn_explain_card.setObjectName("AnkangAiStripExplain")
         self._btn_simplify_card.setObjectName("AnkangAiStripSimplify")
         self._btn_usmle.setObjectName("AnkangAiStripPQ")
+        self._btn_custom_prompt.setObjectName("AnkangAiStripCustom")
         self._btn_usmle.setToolTip(
-            "Practice Ques — board-style multiple-choice from this card"
+            "Board-style multiple-choice practice question based on this card"
         )
-        for b in (self._btn_explain_card, self._btn_simplify_card, self._btn_usmle):
+        self._btn_custom_prompt.setToolTip('Use your own custom prompt, set in "AI Config"')
+        for b in (
+            self._btn_explain_card,
+            self._btn_simplify_card,
+            self._btn_usmle,
+            self._btn_custom_prompt,
+        ):
             b.setFixedHeight(28)
             b.setMinimumWidth(0)
             b.setSizePolicy(
@@ -422,23 +441,40 @@ class AnkangRightSidebar(QDockWidget):
         self._btn_explain_card.clicked.connect(self._ai_action_explain_card)
         self._btn_simplify_card.clicked.connect(self._ai_action_simplify_card)
         self._btn_usmle.clicked.connect(self._ai_action_usmle_question)
+        self._btn_custom_prompt.clicked.connect(self._ai_action_custom_prompt)
         for _tb in (
             self._btn_explain_card,
             self._btn_simplify_card,
             self._btn_usmle,
+            self._btn_custom_prompt,
         ):
             mark_ankang_text_button(_tb)
 
-        # Growing strip so each card button receives width (a bare QSpacerItem would take it all).
+        # Two horizontal button pairs:
+        # - left pair under AI Chatbot: Explain + Simplify
+        # - right pair under Web Browser: Practice Ques + Custom Prompt
         self._ai_card_actions_wrap = QWidget(ai_ctrl)
         self._ai_card_actions_wrap.setMinimumWidth(0)
         _ai_cards = QHBoxLayout(self._ai_card_actions_wrap)
         _ai_cards.setContentsMargins(0, 0, 0, 0)
         _ai_cards.setSpacing(5)
-        _ai_cards.addStretch(1)
-        _ai_cards.addWidget(self._btn_explain_card, 1)
-        _ai_cards.addWidget(self._btn_simplify_card, 1)
-        _ai_cards.addWidget(self._btn_usmle, 1)
+
+        _ai_left_pair = QWidget(self._ai_card_actions_wrap)
+        _ai_left_pair_layout = QHBoxLayout(_ai_left_pair)
+        _ai_left_pair_layout.setContentsMargins(0, 0, 0, 0)
+        _ai_left_pair_layout.setSpacing(5)
+        _ai_left_pair_layout.addWidget(self._btn_explain_card, 1)
+        _ai_left_pair_layout.addWidget(self._btn_simplify_card, 1)
+
+        _ai_right_pair = QWidget(self._ai_card_actions_wrap)
+        _ai_right_pair_layout = QHBoxLayout(_ai_right_pair)
+        _ai_right_pair_layout.setContentsMargins(0, 0, 0, 0)
+        _ai_right_pair_layout.setSpacing(5)
+        _ai_right_pair_layout.addWidget(self._btn_usmle, 1)
+        _ai_right_pair_layout.addWidget(self._btn_custom_prompt, 1)
+
+        _ai_cards.addWidget(_ai_left_pair, 1)
+        _ai_cards.addWidget(_ai_right_pair, 1)
         ai_layout.addWidget(self._ai_card_actions_wrap, 1)
 
         # WEB TAB — back, forward, reload, home, URL bar, enter (icons match AI puzzle size)
@@ -588,21 +624,77 @@ class AnkangRightSidebar(QDockWidget):
 
             QTimer.singleShot(0, self._initialize_web_views_from_session)
 
-    def toggle_ai_service(self):
-        if not QWebEngineView:
-            return
-        current_url = (self.ai_view.url().toString() or "").lower()
+    def _ai_provider_for_url(self, url: str) -> str:
+        u = (url or "").lower()
+        if "claude.ai" in u or "anthropic" in u:
+            return "Claude"
+        if "gemini.google.com" in u or "gemini" in u:
+            return "Gemini"
+        return "ChatGPT"
 
-        def _provider_index(url: str) -> int:
-            if "gemini.google.com" in url or "gemini" in url:
-                return 1
-            if "claude.ai" in url or "anthropic" in url:
-                return 2
-            return 0
+    def open_ai_config_dialog(self) -> None:
+        dlg = QDialog(self)
+        dlg.setWindowTitle("AI Config")
+        root = QVBoxLayout(dlg)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(8)
+        root.addWidget(QLabel("Choose your AI provider:"))
 
-        idx = _provider_index(current_url)
-        next_idx = (idx + 1) % len(_AI_PROVIDER_URLS)
-        self.ai_view.setUrl(QUrl(_AI_PROVIDER_URLS[next_idx]))
+        group = QButtonGroup(dlg)
+        radios: dict[str, QRadioButton] = {}
+        for name in ("Claude", "ChatGPT", "Gemini"):
+            rb = QRadioButton(name)
+            radios[name] = rb
+            group.addButton(rb)
+            root.addWidget(rb)
+
+        current_url = ""
+        if QWebEngineView and hasattr(self, "ai_view"):
+            current_url = self.ai_view.url().toString()
+        selected = self._ai_provider_for_url(current_url)
+        if selected in radios:
+            radios[selected].setChecked(True)
+        else:
+            radios["ChatGPT"].setChecked(True)
+
+        root.addSpacing(8)
+        cp_title = QLabel("Custom Prompt")
+        cp_title.setStyleSheet("font-weight: 700;")
+        root.addWidget(cp_title)
+        cp_hint = QLabel("For this Anki Card [inserted Anki Card], ___")
+        cp_hint.setStyleSheet("font-size: 11px; color: #888888;")
+        root.addWidget(cp_hint)
+        cp_edit = QLineEdit(self._custom_prompt_suffix)
+        cp_edit.setPlaceholderText("Type what you want to replace ___ with")
+        root.addWidget(cp_edit)
+
+        row = QHBoxLayout()
+        row.addStretch(1)
+        save_btn = QPushButton("Save")
+        cancel_btn = QPushButton("Cancel")
+        for b in (save_btn, cancel_btn):
+            mark_ankang_text_button(b)
+        row.addWidget(save_btn)
+        row.addWidget(cancel_btn)
+        root.addLayout(row)
+
+        dlg.setStyleSheet(ankang_text_button_stylesheet())
+        cancel_btn.clicked.connect(dlg.reject)
+
+        def _save() -> None:
+            chosen = "ChatGPT"
+            for name, rb in radios.items():
+                if rb.isChecked():
+                    chosen = name
+                    break
+            self._custom_prompt_suffix = cp_edit.text().strip()
+            if QWebEngineView and hasattr(self, "ai_view"):
+                self.ai_view.setUrl(QUrl(_AI_PROVIDER_MAP[chosen]))
+            self._debounced_persist_session()
+            dlg.accept()
+
+        save_btn.clicked.connect(_save)
+        dlg.exec()
 
     def _sidebar_session_json_path(self) -> str:
         return profile_r_sidebar_session_path()
@@ -635,6 +727,7 @@ class AnkangRightSidebar(QDockWidget):
                 "ai_url": self.ai_view.url().toString(),
                 "web_url": self.web_view.url().toString(),
                 "url_bar": self.url_bar.text(),
+                "custom_prompt_suffix": self._custom_prompt_suffix,
             }
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
@@ -670,6 +763,9 @@ class AnkangRightSidebar(QDockWidget):
                     ai_u = d["ai_url"].strip()
                 if isinstance(d.get("web_url"), str) and d["web_url"].strip():
                     web_u = d["web_url"].strip()
+                cps = d.get("custom_prompt_suffix")
+                if isinstance(cps, str):
+                    self._custom_prompt_suffix = cps
             except (OSError, json.JSONDecodeError, TypeError, ValueError):
                 pass
 
@@ -843,6 +939,18 @@ class AnkangRightSidebar(QDockWidget):
             _USMLE_CARD_PROMPT_TEMPLATE.replace(_USMLE_CARD_PLACEHOLDER, ctx)
         )
 
+    def _ai_action_custom_prompt(self) -> None:
+        ctx = self._reviewer_answer_card_context()
+        if ctx is None:
+            return
+        suffix = (self._custom_prompt_suffix or "").strip()
+        if not suffix:
+            tooltip("Set your custom prompt text in AI Config first.")
+            return
+        self.paste_prompt_into_ai_chat(
+            f"For this Anki Card:\n\n{ctx}\n\n{suffix}"
+        )
+
     def external_search_google(self, text: str) -> None:
         """Open right sidebar on Web tab with a Google search for ``text``."""
         if not QWebEngineView or not hasattr(self, "ai_view") or not hasattr(self, "web_view"):
@@ -891,55 +999,42 @@ class AnkangRightSidebar(QDockWidget):
         QTimer.singleShot(0, self._sync_ai_strip_card_button_labels)
 
     def _sync_ai_strip_card_button_labels(self) -> None:
-        """Use long label only when that button's content rect fits the text; otherwise short."""
+        """Switch AI action labels at a 500px sidebar threshold."""
         if not hasattr(self, "_btn_explain_card"):
             return
-        self.ai_toggle_btn.setToolTip("Switch AI Chatbot")
-        nav_specs = (
-            (
-                self._nav_ai_btn,
-                _NAV_AI_LABEL_LONG,
-                _NAV_AI_LABEL_SHORT,
-                _NAV_AI_LABEL_LONG,
-                "",
-            ),
-            (
-                self._nav_web_btn,
-                _NAV_WEB_LABEL_LONG,
-                _NAV_WEB_LABEL_SHORT,
-                _NAV_WEB_LABEL_LONG,
-                "",
-            ),
+        self.ai_toggle_btn.setToolTip("AI Config")
+        w = self.width()
+        use_short = w < 500
+        use_ultra_short = w < 300
+        self._nav_ai_btn.setText(_NAV_AI_LABEL_SHORT if use_ultra_short else _NAV_AI_LABEL_LONG)
+        self._nav_ai_btn.setToolTip(_NAV_AI_LABEL_LONG)
+        self._nav_web_btn.setText(_NAV_WEB_LABEL_SHORT if use_ultra_short else _NAV_WEB_LABEL_LONG)
+        self._nav_web_btn.setToolTip(_NAV_WEB_LABEL_LONG)
+        explain_txt = (
+            "Expl."
+            if use_ultra_short
+            else (_AI_STRIP_CARD_LABELS_SHORT[0] if use_short else _AI_STRIP_CARD_LABELS_LONG[0])
         )
-        specs = (
-            (
-                self._btn_explain_card,
-                _AI_STRIP_CARD_LABELS_LONG[0],
-                _AI_STRIP_CARD_LABELS_SHORT[0],
-                "Explain Card",
-                "",
-            ),
-            (
-                self._btn_simplify_card,
-                _AI_STRIP_CARD_LABELS_LONG[1],
-                _AI_STRIP_CARD_LABELS_SHORT[1],
-                "Simplify Card",
-                "",
-            ),
-            (
-                self._btn_usmle,
-                _AI_STRIP_CARD_LABELS_LONG[2],
-                _AI_STRIP_CARD_LABELS_SHORT[2],
-                "Practice Ques — board-style multiple-choice from this card",
-                "Board-style multiple-choice question from this card",
-            ),
+        simplify_txt = (
+            "Simp."
+            if use_ultra_short
+            else (_AI_STRIP_CARD_LABELS_SHORT[1] if use_short else _AI_STRIP_CARD_LABELS_LONG[1])
         )
-        for btn, long_t, short_t, tip_short, tip_long in nav_specs + specs:
-            inner = _ankang_push_button_contents_width(btn)
-            fm = QFontMetrics(btn.font())
-            use_long = inner > 0 and fm.horizontalAdvance(long_t) + 1 <= inner
-            btn.setText(long_t if use_long else short_t)
-            btn.setToolTip(tip_long if use_long else tip_short)
+        custom_txt = (
+            "Cust."
+            if use_ultra_short
+            else (_AI_STRIP_CARD_LABELS_SHORT[3] if use_short else _AI_STRIP_CARD_LABELS_LONG[3])
+        )
+        self._btn_explain_card.setText(explain_txt)
+        self._btn_explain_card.setToolTip("Explain Card")
+        self._btn_simplify_card.setText(simplify_txt)
+        self._btn_simplify_card.setToolTip("Simplify Card")
+        self._btn_usmle.setText(
+            _AI_STRIP_CARD_LABELS_SHORT[2] if use_short else _AI_STRIP_CARD_LABELS_LONG[2]
+        )
+        self._btn_usmle.setToolTip("Board-style multiple-choice practice question based on this card")
+        self._btn_custom_prompt.setText(custom_txt)
+        self._btn_custom_prompt.setToolTip('Use your own custom prompt, set in "AI Config"')
 
     def apply_theme(self):
         dark = self._is_dark_mode()
@@ -1032,7 +1127,8 @@ class AnkangRightSidebar(QDockWidget):
             QPushButton#AnkangRightNavWeb,
             QPushButton#AnkangAiStripExplain,
             QPushButton#AnkangAiStripSimplify,
-            QPushButton#AnkangAiStripPQ {{
+            QPushButton#AnkangAiStripPQ,
+            QPushButton#AnkangAiStripCustom {{
                 padding-left: 5%;
                 padding-right: 5%;
             }}
