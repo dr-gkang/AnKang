@@ -26,6 +26,11 @@ except ImportError:
 
 _DEFAULT_AI_URL = "https://chat.openai.com"
 _DEFAULT_WEB_URL = "https://www.google.com"
+_AI_PROVIDER_URLS: tuple[str, ...] = (
+    "https://chat.openai.com",
+    "https://gemini.google.com",
+    "https://claude.ai/new",
+)
 
 _ANKANG_CTRL_STRIP_HEIGHT = 35
 
@@ -586,11 +591,18 @@ class AnkangRightSidebar(QDockWidget):
     def toggle_ai_service(self):
         if not QWebEngineView:
             return
-        current_url = self.ai_view.url().toString()
-        if "gemini" in current_url:
-            self.ai_view.setUrl(QUrl(_DEFAULT_AI_URL))
-        else:
-            self.ai_view.setUrl(QUrl("https://gemini.google.com"))
+        current_url = (self.ai_view.url().toString() or "").lower()
+
+        def _provider_index(url: str) -> int:
+            if "gemini.google.com" in url or "gemini" in url:
+                return 1
+            if "claude.ai" in url or "anthropic" in url:
+                return 2
+            return 0
+
+        idx = _provider_index(current_url)
+        next_idx = (idx + 1) % len(_AI_PROVIDER_URLS)
+        self.ai_view.setUrl(QUrl(_AI_PROVIDER_URLS[next_idx]))
 
     def _sidebar_session_json_path(self) -> str:
         return profile_r_sidebar_session_path()
