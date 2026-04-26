@@ -2,7 +2,7 @@
   "name": "AnKang",
   "package": "AnKang",
   "author": "dr-gkang",
-  "version": "1.1.0-dev",
+  "version": "1.1.0",
   "homepage": "https://ankiweb.net/shared/info/1680917863",
   "conflicts": []
 }

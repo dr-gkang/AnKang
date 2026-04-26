@@ -139,13 +139,39 @@ def show_whats_new_dialog(*, force: bool = False) -> None:
     root.setContentsMargins(16, 16, 16, 16)
     root.setSpacing(10)
 
-    title = QLabel(f"What's New in AnKang v{current}")
+    title = QLabel(f"What's New in AnKang v{current}?!")
     title.setWordWrap(True)
     title.setStyleSheet("font-size: 17px; font-weight: 700;")
     root.addWidget(title)
 
-    msg = QLabel("Work in Progress!")
+    msg = QLabel(
+        "<ul>"
+        "<li><b>AnKang Filtered Deck Builder (in AnKang menu at the top of the screen)</b>"
+        "<ul><li>Easily make a filtered deck without complicated tags in browse window "
+        "(currently only certain 3rd party resources using AnKing Step 1 v12 tags)</li></ul></li>"
+        "<li><b>To-Do List Widget complete overhaul</b>"
+        "<ul>"
+        "<li>Add non-Anki tasks</li>"
+        "<li>Bulk add tasks from a parent deck (like all subdecks under an exam deck)</li>"
+        "<li>Added hyperlinks to quickly start decks directly from the To-Do List</li>"
+        "</ul></li>"
+        "<li><b>Fixed bugs in Notes Widget</b></li>"
+        "<li><b>UI overhaul for Exam Countdown</b></li>"
+        "<li><b>Timer Widget complete overhaul</b>"
+        "<ul><li>Added tabs consisting of common timers, pomodoro options, exam preset timers "
+        "(USMLE, COMLEX, CBSE, MCAT), and an option for a custom timer</li></ul></li>"
+        "<li><b>AI Tab in Right Sidebar changes</b>"
+        "<ul>"
+        "<li>Added Claude</li>"
+        "<li>Added Custom Prompt</li>"
+        "<li>UI changes and minor bug fixes</li>"
+        "</ul></li>"
+        "<li><b>Added a WIP Help Wiki in AnKang top menu</b></li>"
+        "<li><b>General Bug Fixes</b></li>"
+        "</ul>"
+    )
     msg.setWordWrap(True)
+    msg.setTextFormat(Qt.TextFormat.RichText)
     msg.setStyleSheet("font-size: 13px;")
     root.addWidget(msg)
 
