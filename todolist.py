@@ -15,6 +15,7 @@ from .ankang_format_styles import (
     ankang_text_button_stylesheet,
     format_user_date,
     format_user_datetime,
+    format_user_time_12h,
     mark_ankang_text_button,
 )
 
@@ -213,6 +214,61 @@ def _deck_color_stylesheet(color: str, strikethrough: bool) -> str:
     return f"color: {color}; {deco}"
 
 
+def _safe_int(value: object) -> int | None:
+    try:
+        if value is None or isinstance(value, bool):
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _deck_id_from_name(deck_name: str | None) -> int | None:
+    if not deck_name or not getattr(mw, "col", None):
+        return None
+    try:
+        d = mw.col.decks.by_name(deck_name)
+    except Exception:
+        return None
+    if not d:
+        return None
+    if isinstance(d, dict):
+        return _safe_int(d.get("id"))
+    return _safe_int(getattr(d, "id", None))
+
+
+def _deck_name_from_id(deck_id: int | None) -> str | None:
+    did = _safe_int(deck_id)
+    if did is None or not getattr(mw, "col", None):
+        return None
+    try:
+        d = mw.col.decks.get(did)
+    except Exception:
+        return None
+    if not d:
+        return None
+    if isinstance(d, dict):
+        n = d.get("name")
+    else:
+        n = getattr(d, "name", None)
+    if isinstance(n, str) and n.strip():
+        return n.strip()
+    return None
+
+
+def _direct_subdecks(parent_deck: str, all_names: list[str]) -> list[str]:
+    pref = parent_deck + "::"
+    out: list[str] = []
+    for name in all_names:
+        if not name.startswith(pref):
+            continue
+        tail = name[len(pref):]
+        if not tail or "::" in tail:
+            continue
+        out.append(name)
+    return sorted(set(out), key=str.lower)
+
+
 def _make_task_title_column(
     task_title: str,
     linked_deck: str | None,
@@ -253,7 +309,7 @@ def _make_task_title_column(
         link.setStyleSheet(f"color: {link_color};")
         link.setToolTip("Open this deck in Review")
         if on_open_deck is not None:
-            link.linkActivated.connect(lambda _=None, d=linked_deck: on_open_deck(d))
+            link.linkActivated.connect(lambda _=None: on_open_deck())
         v.addWidget(link)
 
     return col
@@ -277,10 +333,11 @@ def _task_row_style(now: datetime, item: dict) -> tuple[str, str, str]:
     if not dt_full:
         return "#ffffff", "—", ""
 
+    short_date = dt_full.strftime("%a - %m/%d")
     tooltip = (
-        format_user_datetime(dt_full)
+        f"{short_date} {format_user_time_12h(dt_full)}"
         if due_time
-        else f"{format_user_date(dt_full)} (end of day)"
+        else f"{short_date} (end of day)"
     )
 
     if now > dt_full:
@@ -317,6 +374,7 @@ def _migrate_legacy_item(raw: dict, col) -> dict | None:
         "id": raw.get("id") or uuid.uuid4().hex,
         "deck": deck,
         "linked_deck": None,
+        "linked_deck_id": _deck_id_from_name(deck),
         "due_date": raw.get("due_date"),
         "due_time": raw.get("due_time"),
         "completed": bool(raw.get("completed", False)),
@@ -337,10 +395,18 @@ def _normalize_item(raw: dict, col) -> dict | None:
     linked_deck = raw.get("linked_deck")
     if not isinstance(linked_deck, str) or not linked_deck.strip():
         linked_deck = None
+    linked_deck_id = _safe_int(raw.get("linked_deck_id"))
+    if linked_deck_id is None and linked_deck:
+        linked_deck_id = _deck_id_from_name(linked_deck)
+    if linked_deck_id is not None:
+        resolved = _deck_name_from_id(linked_deck_id)
+        if resolved:
+            linked_deck = resolved
     return {
         "id": raw.get("id") or uuid.uuid4().hex,
         "deck": deck,
         "linked_deck": linked_deck,
+        "linked_deck_id": linked_deck_id,
         "due_date": raw.get("due_date") if raw.get("due_date") else None,
         "due_time": raw.get("due_time") if raw.get("due_time") else None,
         "completed": bool(raw.get("completed", False)),
@@ -399,6 +465,7 @@ class TaskFormDialog(QDialog):
         comp.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         comp.setFilterMode(Qt.MatchFlag.MatchContains)
         self._deck_combo.setCompleter(comp)
+        self._initial_linked_deck_id = _safe_int(initial.get("linked_deck_id"))
         deck_lay.addWidget(self._task_text)
         deck_lay.addWidget(self._deck_combo)
         self._deck_name_hint = QLabel(
@@ -417,7 +484,7 @@ class TaskFormDialog(QDialog):
         self._has_date = QCheckBox("Set due date")
         self._date_edit = QDateEdit()
         self._date_edit.setCalendarPopup(True)
-        self._date_edit.setDisplayFormat("MM/dd/yyyy")
+        self._date_edit.setDisplayFormat("ddd - MM/dd")
         self._date_edit.setDate(QDate.currentDate())
 
         self._has_time = QCheckBox("Set due time")
@@ -481,6 +548,10 @@ class TaskFormDialog(QDialog):
         linked_deck = initial.get("linked_deck")
         if task_title:
             self._task_text.setText(task_title)
+        if self._initial_linked_deck_id is not None:
+            resolved = _deck_name_from_id(self._initial_linked_deck_id)
+            if resolved:
+                linked_deck = resolved
         if linked_deck and linked_deck in self._full_deck_list:
             self._deck_combo.setCurrentText(linked_deck)
         elif linked_deck:
@@ -558,6 +629,7 @@ class TaskFormDialog(QDialog):
     def build_payload(self) -> dict:
         deck = self._resolved_task_label()
         linked_deck = self._deck_combo.currentText().strip() or None
+        linked_deck_id = _deck_id_from_name(linked_deck) if linked_deck else None
         due_date = None
         due_time = None
         if self._has_date.isChecked():
@@ -571,9 +643,136 @@ class TaskFormDialog(QDialog):
         return {
             "deck": deck,
             "linked_deck": linked_deck,
+            "linked_deck_id": linked_deck_id,
             "due_date": due_date,
             "due_time": due_time,
         }
+
+
+class BulkParentDeckSelectDialog(QDialog):
+    def __init__(self, parent: QWidget | None, deck_names: list[str]):
+        super().__init__(parent or mw)
+        self.setWindowTitle("Bulk tasks from parent deck")
+        root = QVBoxLayout(self)
+        root.addWidget(QLabel("Select a parent deck:"))
+        self._combo = QComboBox()
+        self._combo.setEditable(True)
+        self._combo.addItems(deck_names)
+        comp = QCompleter(deck_names, self._combo)
+        comp.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        comp.setFilterMode(Qt.MatchFlag.MatchContains)
+        self._combo.setCompleter(comp)
+        root.addWidget(self._combo)
+        row = QHBoxLayout()
+        ok_btn = QPushButton("Next")
+        cancel_btn = QPushButton("Cancel")
+        for b in (ok_btn, cancel_btn):
+            mark_ankang_text_button(b)
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+        row.addStretch(1)
+        row.addWidget(ok_btn)
+        row.addWidget(cancel_btn)
+        root.addLayout(row)
+        self.setStyleSheet(ankang_text_button_stylesheet())
+        self.setMinimumWidth(420)
+
+    def selected_parent_deck(self) -> str:
+        return self._combo.currentText().strip()
+
+
+class BulkTaskEditorDialog(QDialog):
+    def __init__(self, parent: QWidget | None, subdecks: list[str]):
+        super().__init__(parent or mw)
+        self.setWindowTitle("Bulk Add Tasks")
+        self.resize(760, 560)
+        self._rows: list[tuple[QLineEdit, str, int | None, QDateEdit, QWidget]] = []
+
+        root = QVBoxLayout(self)
+        self._table = QTableWidget(0, 4, self)
+        self._table.setHorizontalHeaderLabels(
+            ["Optional task name", "Linked deck", "Due date", ""]
+        )
+        self._table.verticalHeader().setVisible(False)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self._table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        root.addWidget(self._table, 1)
+
+        for deck_name in subdecks:
+            self._append_row(deck_name)
+
+        row = QHBoxLayout()
+        save_btn = QPushButton("Save")
+        cancel_btn = QPushButton("Cancel")
+        for b in (save_btn, cancel_btn):
+            mark_ankang_text_button(b)
+        save_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+        row.addStretch(1)
+        row.addWidget(save_btn)
+        row.addWidget(cancel_btn)
+        root.addLayout(row)
+        self.setStyleSheet(ankang_text_button_stylesheet())
+
+    def _append_row(self, deck_name: str) -> None:
+        r = self._table.rowCount()
+        self._table.insertRow(r)
+        name_edit = QLineEdit()
+        name_edit.setPlaceholderText("Optional task name")
+        name_edit.setText(deck_name.rsplit("::", 1)[-1])
+        self._table.setCellWidget(r, 0, name_edit)
+        self._table.setItem(r, 1, QTableWidgetItem(deck_name))
+        due_edit = QDateEdit()
+        due_edit.setCalendarPopup(True)
+        due_edit.setDisplayFormat("ddd - MM/dd")
+        due_edit.setDate(QDate.currentDate())
+        self._table.setCellWidget(r, 2, due_edit)
+        trash_btn = _make_icon_toolbutton(
+            os.path.dirname(__file__),
+            "C_TrashClosed",
+            "CP_TrashOpen",
+            QSize(20, 20),
+            "Remove row",
+            self._table,
+        )
+        trash_btn.clicked.connect(lambda _=None, row_widget=trash_btn: self._remove_row_for_widget(row_widget))
+        self._table.setCellWidget(r, 3, trash_btn)
+        self._rows.append((name_edit, deck_name, _deck_id_from_name(deck_name), due_edit, trash_btn))
+
+    def _remove_row_for_widget(self, widget: QWidget) -> None:
+        idx = None
+        for i, row in enumerate(self._rows):
+            if row[4] is widget:
+                idx = i
+                break
+        if idx is None:
+            return
+        self._rows.pop(idx)
+        self._table.removeRow(idx)
+
+    def build_tasks(self) -> list[dict]:
+        out: list[dict] = []
+        for name_edit, deck_name, deck_id, due_edit, _ in self._rows:
+            if not deck_name:
+                continue
+            typed = name_edit.text().strip()
+            task_name = typed or deck_name.rsplit("::", 1)[-1]
+            out.append(
+                {
+                    "id": uuid.uuid4().hex,
+                    "deck": task_name,
+                    "linked_deck": deck_name,
+                    "linked_deck_id": deck_id,
+                    "due_date": due_edit.date().toString(Qt.DateFormat.ISODate),
+                    "due_time": None,
+                    "completed": False,
+                }
+            )
+        return out
 
 
 class TodoDialog(QDialog):
@@ -631,6 +830,16 @@ class TodoDialog(QDialog):
         )
         self._btn_add.clicked.connect(self._open_add_task)
         top.addWidget(self._btn_add, alignment=Qt.AlignmentFlag.AlignRight)
+        self._btn_bulk = _make_icon_toolbutton(
+            self.addon_path,
+            "C_Task1",
+            "CP_Task1",
+            QSize(28, 28),
+            "Bulk tasks from parent deck",
+            self,
+        )
+        self._btn_bulk.clicked.connect(self._open_bulk_add_from_parent_deck)
+        top.addWidget(self._btn_bulk, alignment=Qt.AlignmentFlag.AlignRight)
 
         self._archive_toggle_btn = _make_icon_toolbutton(
             self.addon_path,
@@ -702,11 +911,43 @@ class TodoDialog(QDialog):
                 "id": uuid.uuid4().hex,
                 "deck": p["deck"],
                 "linked_deck": p.get("linked_deck"),
+                "linked_deck_id": p.get("linked_deck_id"),
                 "due_date": p["due_date"],
                 "due_time": p["due_time"],
                 "completed": False,
             }
         )
+        self.save_data()
+        self.refresh_ui()
+
+    def _open_bulk_add_from_parent_deck(self) -> None:
+        if not getattr(mw, "col", None):
+            return
+        all_names = sorted(mw.col.decks.all_names())
+        if not all_names:
+            return
+        pick = BulkParentDeckSelectDialog(self, all_names)
+        if pick.exec() != QDialog.DialogCode.Accepted:
+            return
+        parent = pick.selected_parent_deck()
+        if parent not in all_names:
+            from aqt.utils import showWarning
+            showWarning("Select a valid parent deck.")
+            return
+        subs = _direct_subdecks(parent, all_names)
+        if not subs:
+            from aqt.utils import showWarning
+            showWarning("No direct subdecks found under that parent deck.")
+            return
+        if len(subs) > 40:
+            subs = subs[:40]
+        dlg = BulkTaskEditorDialog(self, subs)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        new_tasks = dlg.build_tasks()
+        if not new_tasks:
+            return
+        self.data["active"].extend(new_tasks)
         self.save_data()
         self.refresh_ui()
 
@@ -739,14 +980,21 @@ class TodoDialog(QDialog):
                 return t
         return None
 
-    def _open_linked_deck_review(self, deck_name: str) -> None:
-        if not deck_name or not mw.col:
+    def _open_linked_deck_review(self, *, deck_name: str | None, deck_id: int | None) -> None:
+        if not mw.col:
             return
-        deck = mw.col.decks.by_name(deck_name)
+        deck = None
+        if _safe_int(deck_id) is not None:
+            try:
+                deck = mw.col.decks.get(int(deck_id))
+            except Exception:
+                deck = None
+        if not deck and deck_name:
+            deck = mw.col.decks.by_name(deck_name)
         if not deck:
             from aqt.utils import showWarning
 
-            showWarning(f"Deck not found:\n{deck_name}")
+            showWarning(f"Deck not found:\n{deck_name or deck_id}")
             return
         try:
             did = int(deck["id"]) if isinstance(deck, dict) else int(deck.id)
@@ -764,9 +1012,14 @@ class TodoDialog(QDialog):
         item = self._find_active_by_id(task_id)
         if not item:
             return
+        prev_scroll = 0
+        try:
+            prev_scroll = int(self.scroll.verticalScrollBar().value())
+        except Exception:
+            prev_scroll = 0
         item["completed"] = not item.get("completed", False)
         self.save_data()
-        self.refresh_ui()
+        self.refresh_ui(preserve_scroll_y=prev_scroll)
 
     def _archive_task(self, task_id: str) -> None:
         item = self._find_active_by_id(task_id)
@@ -777,6 +1030,7 @@ class TodoDialog(QDialog):
             "id": item.get("id") or uuid.uuid4().hex,
             "deck": item["deck"],
             "linked_deck": item.get("linked_deck"),
+            "linked_deck_id": item.get("linked_deck_id"),
             "due_date": item.get("due_date"),
             "due_time": item.get("due_time"),
             "completed": True,
@@ -796,7 +1050,7 @@ class TodoDialog(QDialog):
                 w.setParent(None)
                 w.deleteLater()
 
-    def refresh_ui(self) -> None:
+    def refresh_ui(self, preserve_scroll_y: int | None = None) -> None:
         n_archived_before = len(self.data.get("archived", []))
         self._purge_old_archived()
         archive_purged = len(self.data.get("archived", [])) != n_archived_before
@@ -808,6 +1062,15 @@ class TodoDialog(QDialog):
         for t in active:
             if "id" not in t or not t["id"]:
                 t["id"] = uuid.uuid4().hex
+            did = _safe_int(t.get("linked_deck_id"))
+            if did is not None:
+                resolved = _deck_name_from_id(did)
+                if resolved:
+                    t["linked_deck"] = resolved
+                else:
+                    t["linked_deck_id"] = None
+            elif isinstance(t.get("linked_deck"), str) and t.get("linked_deck"):
+                t["linked_deck_id"] = _deck_id_from_name(t.get("linked_deck"))
         active.sort(key=_active_sort_key)
 
         for item in active:
@@ -837,12 +1100,13 @@ class TodoDialog(QDialog):
             deck_color, cd_text, cd_tip = _task_row_style(now, item)
             task_title = item.get("deck") or ""
             linked_deck = item.get("linked_deck")
+            linked_deck_id = _safe_int(item.get("linked_deck_id"))
             deck_col = _make_task_title_column(
                 task_title,
                 linked_deck,
                 deck_color,
                 done,
-                on_open_deck=self._open_linked_deck_review,
+                on_open_deck=lambda d=linked_deck, did=linked_deck_id: self._open_linked_deck_review(deck_name=d, deck_id=did),
             )
 
             cd_lbl = QLabel(cd_text)
@@ -928,6 +1192,10 @@ class TodoDialog(QDialog):
 
         if archive_purged:
             self.save_data()
+        if preserve_scroll_y is not None:
+            sb = self.scroll.verticalScrollBar()
+            target = max(sb.minimum(), min(int(preserve_scroll_y), sb.maximum()))
+            QTimer.singleShot(0, lambda: sb.setValue(target))
 
     def _purge_old_archived(self) -> None:
         cutoff = datetime.now() - timedelta(days=ARCHIVE_RETENTION_DAYS)
