@@ -249,7 +249,7 @@ def _ankang_inject_toolbar_reopen_row() -> None:
     wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     row = QHBoxLayout(wrap)
     row.setContentsMargins(4, 0, 4, 0)
-    row.setSpacing(0)
+    row.setSpacing(4)
 
     left_btn = _ankang_build_toolbar_reopen_button(
         unpressed_name="C_RightArrow1",
@@ -271,9 +271,13 @@ def _ankang_inject_toolbar_reopen_row() -> None:
     )
     right_btn.clicked.connect(lambda: mw.ankang_right_assistant.show())
 
-    row.addWidget(left_btn, 0, Qt.AlignmentFlag.AlignVCenter)
-    row.addWidget(tweb, 1)
-    row.addWidget(right_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+    # Keep reopen arrows pinned to the far edges even if another add-on
+    # constrains toolbarWeb width/size policy.
+    row.addWidget(left_btn, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+    row.addStretch(1)
+    row.addWidget(tweb, 0)
+    row.addStretch(1)
+    row.addWidget(right_btn, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
 
     main_layout.insertWidget(idx, wrap)
 
