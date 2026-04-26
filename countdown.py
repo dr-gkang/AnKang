@@ -489,10 +489,42 @@ class ExamCountdownWidget(QWidget):
         self._refresh()
 
     def _open_config(self) -> None:
-        dlg = ExamCountdownConfigDialog(self._slots, self)
-        dlg.exec()
-        self._slots = dlg.slots()
+        menu = QMenu(self)
+        dark = self.palette().color(QPalette.ColorRole.Window).lightness() < 128
+        fg = "#ffffff" if dark else "#000000"
+        bg = "#3a3a3a" if dark else "#f3f3f3"
+        menu.setStyleSheet(
+            f"QMenu {{ background-color: {bg}; color: {fg}; border: 1px solid #5DA9DF; }}"
+        )
+        for i in range(3):
+            label = _slot_name(self._slots[i], i)
+            menu.addAction(f"Edit {label}").triggered.connect(
+                lambda _=False, idx=i: self._edit_slot(idx)
+            )
+        menu.addSeparator()
+        menu.addAction("Clear all exams").triggered.connect(self._clear_all_slots)
+        menu.exec(self.config_btn.mapToGlobal(QPoint(0, self.config_btn.height())))
+
+    def _edit_slot(self, idx: int) -> None:
+        if idx < 0 or idx > 2:
+            return
+        dlg = ExamSlotDialog(idx, initial=self._slots[idx], parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        if dlg.removal_requested():
+            self._slots[idx] = None
+        else:
+            built = dlg.build_slot()
+            if built:
+                self._slots[idx] = built
         self._ensure_current_slot_valid()
+        self._save()
+        self._apply_switch_icons()
+        self._refresh()
+
+    def _clear_all_slots(self) -> None:
+        self._slots = [None, None, None]
+        self._current_slot = 0
         self._save()
         self._apply_switch_icons()
         self._refresh()

@@ -227,6 +227,8 @@ class NotesDialog(QDialog):
         self._prev_book = ""
         self._prev_chapter = ""
         self._addon_path = os.path.dirname(__file__)
+        self._ui_state_path = profile_data_file("notes_ui_state.json")
+        self._suspend_view_state_save = True
 
         root = QVBoxLayout(self)
         root.setSpacing(6)
@@ -316,16 +318,13 @@ class NotesDialog(QDialog):
         self._open_anki_btn.clicked.connect(self._on_open_anki_card)
         self._open_anki_btn.hide()
         save_btn = QPushButton("Save")
-        close_btn = QPushButton("Close")
-        for b in (save_btn, close_btn):
+        for b in (save_btn,):
             mark_ankang_text_button(b)
         save_btn.clicked.connect(self._save_note_and_file)
-        close_btn.clicked.connect(self._on_close)
         btn_row.addWidget(self._move_note_btn)
         btn_row.addWidget(self._open_anki_btn)
         btn_row.addStretch(1)
         btn_row.addWidget(save_btn)
-        btn_row.addWidget(close_btn)
         root.addLayout(btn_row)
 
         self._book.currentTextChanged.connect(self._on_book_changed)
@@ -339,6 +338,8 @@ class NotesDialog(QDialog):
         self._prev_book = self._book.currentText()
         self._prev_chapter = self._chapter.currentText()
         self._sync_list_from_data()
+        self._restore_last_view_state()
+        self._suspend_view_state_save = False
 
     def _books_dict(self) -> dict:
         return self._data.setdefault("books", {})
@@ -573,12 +574,14 @@ class NotesDialog(QDialog):
         self._refresh_chapter_combo()
         self._prev_chapter = self._current_chapter()
         self._sync_list_from_data()
+        self._save_last_view_state()
 
     def _on_chapter_changed(self, _t: str) -> None:
         self._flush_into_path(self._prev_book, self._prev_chapter)
         self._prev_book = self._current_book()
         self._prev_chapter = self._current_chapter()
         self._sync_list_from_data()
+        self._save_last_view_state()
 
     def _on_note_selected(self, cur: QListWidgetItem | None, _prev) -> None:
         if cur is None:
@@ -596,6 +599,7 @@ class NotesDialog(QDialog):
                 self._body.setPlainText(note.get("body") or "")
                 break
         self._refresh_anki_link_button()
+        self._save_last_view_state()
 
     def _new_book(self) -> None:
         name, ok = QInputDialog.getText(self, "New book", "Book name:")
@@ -837,10 +841,65 @@ class NotesDialog(QDialog):
         self._flush_into_path(self._current_book(), self._current_chapter())
         self._persist()
 
-    def _on_close(self) -> None:
+    def closeEvent(self, event: QCloseEvent) -> None:
+        # Handles window-manager close (X) so last-view state persists
+        # exactly like pressing the in-dialog Close button.
         self._flush_into_path(self._current_book(), self._current_chapter())
         self._persist()
-        self.accept()
+        self._save_last_view_state()
+        super().closeEvent(event)
+
+    def _save_last_view_state(self) -> None:
+        if getattr(self, "_suspend_view_state_save", False):
+            return
+        book = self._current_book()
+        chapter = self._current_chapter()
+        if not book or not chapter:
+            return
+        prev: dict = {}
+        if os.path.exists(self._ui_state_path):
+            try:
+                with open(self._ui_state_path, encoding="utf-8") as f:
+                    old = json.load(f)
+                if isinstance(old, dict):
+                    prev = old
+            except (OSError, json.JSONDecodeError):
+                prev = {}
+        note_id = self._current_note_id or prev.get("note_id")
+        state = {"book": book, "chapter": chapter, "note_id": note_id}
+        try:
+            with open(self._ui_state_path, "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=2)
+        except OSError:
+            pass
+
+    def _restore_last_view_state(self) -> None:
+        if not os.path.exists(self._ui_state_path):
+            return
+        try:
+            with open(self._ui_state_path, encoding="utf-8") as f:
+                state = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return
+        if not isinstance(state, dict):
+            return
+        b = state.get("book")
+        c = state.get("chapter")
+        nid = state.get("note_id")
+        if isinstance(b, str) and b and self._book.findText(b) >= 0:
+            self._suspend_view_state_save = True
+            try:
+                self._book.blockSignals(True)
+                self._chapter.blockSignals(True)
+                self._book.setCurrentText(b)
+                self._book.blockSignals(False)
+                self._refresh_chapter_combo(select_name=c if isinstance(c, str) else None)
+                self._chapter.blockSignals(False)
+                self._prev_book = self._current_book()
+                self._prev_chapter = self._current_chapter()
+                self._sync_list_from_data(select_note_id=nid if isinstance(nid, str) else None)
+            finally:
+                self._suspend_view_state_save = False
 
     def _persist(self) -> None:
         _ensure_books_shape(self._data)
