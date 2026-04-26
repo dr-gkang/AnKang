@@ -18,6 +18,10 @@ A FREE AI sidekick that lives in your right sidebar, ready to explain complex me
 * **Contextual AI:** Select text on any card to send it directly to your assistant or to a Google Search.
 * **Quick Prompts:** With a click of a button, ask AI to explain, simplify, or test you on the current Anki Card.
 
+### 🤫 Easily create filtered decks!
+Using a downloaded Anki Deck with a limited set of 3rd-party resources/tags to automatically create a filtered deck in just a few clicks!
+* Even filter by High/Low Yield Cards!
+
 ### 🚫 Minimize Sidebars
 Need some space and don't want any of these features distracting you or taking up screen space?
 * With a click of a button, minimize the Left Sidebar, Right Sidebar, or both! Keep things out of the way so you can focus on your studies.
