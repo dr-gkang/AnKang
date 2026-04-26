@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 import os
-import json
 from aqt import mw
 from aqt.qt import *
 from aqt import gui_hooks
 
-from .ankang_profile_storage import (
-    ensure_addon_data_migrated_for_profile,
-    load_profile_ui_state,
-    save_profile_ui_state,
-)
+from .ankang_profile_storage import ensure_addon_data_migrated_for_profile
 from .ankang_format_styles import ankang_text_button_stylesheet, mark_ankang_text_button
+from .menu_bar import install_ankang_menu
 from .notes import ankang_open_notes_with_quote
 from .sidebar_left import AnkangLeftSidebar, ankang_divider_color
 from .sidebar_right import (
@@ -21,173 +17,10 @@ from .sidebar_right import (
     _load_icon_from_path,
     _resolve_media_asset,
 )
+from .startup_popups import show_startup_popups
 
 ANKANG_MW_STYLE_BEGIN = "/*ankang-mw-style-begin*/"
 ANKANG_MW_STYLE_END = "/*ankang-mw-style-end*/"
-_ANKANG_DEFAULT_PATCHNOTES_URL = "https://github.com/dr-gkang/AnKang/releases"
-_ANKANG_HELP_WIKI_URL = "https://github.com/dr-gkang/AnKang/wiki"
-_ANKANG_WHATS_NEW_ITEMS = (
-    ("Welcome popup", "New first-install message with quick onboarding guidance."),
-    ("What's New popup", "Version-based update modal shown after installs/updates."),
-    ("Top menu entry", "AnKang menu now appears in the main menu bar."),
-    ("Support updates", "Support links now use AnkiWeb + Ko-fi."),
-)
-
-
-def _ankang_manifest_version() -> str:
-    manifest_path = os.path.join(os.path.dirname(__file__), "manifest.json")
-    try:
-        with open(manifest_path, encoding="utf-8") as f:
-            data = json.load(f)
-        version = str(data.get("version") or "").strip()
-        if version:
-            return version
-    except (OSError, json.JSONDecodeError, TypeError, ValueError):
-        pass
-    return "dev"
-
-
-def _ankang_get_seen_version_state() -> tuple[dict, str, str]:
-    state = load_profile_ui_state()
-    current = _ankang_manifest_version()
-    last_seen = str(state.get("last_seen_version") or "").strip()
-    return state, current, last_seen
-
-
-def _ankang_mark_seen_version(version: str | None = None) -> None:
-    state = load_profile_ui_state()
-    state["last_seen_version"] = (version or _ankang_manifest_version()).strip()
-    save_profile_ui_state(state)
-
-
-def _ankang_set_welcome_seen(seen: bool) -> None:
-    state = load_profile_ui_state()
-    state["welcome_seen"] = bool(seen)
-    save_profile_ui_state(state)
-
-
-def _ankang_toggle_left_sidebar() -> None:
-    dock = getattr(mw, "ankang_left_sidebar", None)
-    if dock is not None:
-        dock.setVisible(not dock.isVisible())
-
-
-def _ankang_toggle_right_sidebar() -> None:
-    dock = getattr(mw, "ankang_right_assistant", None)
-    if dock is not None:
-        dock.setVisible(not dock.isVisible())
-
-
-def _ankang_open_url(url: str) -> None:
-    qurl = QUrl(url)
-    if qurl.isValid():
-        QDesktopServices.openUrl(qurl)
-
-
-def _ankang_show_welcome_dialog(*, force: bool = False) -> None:
-    state = load_profile_ui_state()
-    if not force and bool(state.get("welcome_seen", False)):
-        return
-    dlg = QDialog(mw)
-    dlg.setWindowTitle("Welcome to AnKang")
-    root = QVBoxLayout(dlg)
-    msg = QLabel(
-        "Thanks for installing AnKang.\n\n"
-        'I recommend taking a look at the "Help Wiki" to get started.'
-    )
-    msg.setWordWrap(True)
-    root.addWidget(msg)
-    dont_show = QCheckBox("Don't show again")
-    root.addWidget(dont_show)
-    row = QHBoxLayout()
-    row.addStretch(1)
-    help_btn = QPushButton("Open Help Wiki")
-    close_btn = QPushButton("Close")
-    help_btn.clicked.connect(lambda: _ankang_open_url(_ANKANG_HELP_WIKI_URL))
-    close_btn.clicked.connect(dlg.accept)
-    row.addWidget(help_btn)
-    row.addWidget(close_btn)
-    root.addLayout(row)
-    dlg.exec()
-    if dont_show.isChecked():
-        _ankang_set_welcome_seen(True)
-
-
-def _ankang_show_whats_new_dialog(*, force: bool = False) -> None:
-    state, current, last_seen = _ankang_get_seen_version_state()
-    if not force and last_seen == current:
-        return
-    dlg = QDialog(mw)
-    dlg.setWindowTitle(f"What's New - AnKang {current}")
-    dlg.setMinimumWidth(520)
-    root = QVBoxLayout(dlg)
-    root.setContentsMargins(16, 16, 16, 16)
-    root.setSpacing(10)
-
-    title = QLabel(f"What's New in AnKang v{current}")
-    title.setWordWrap(True)
-    title.setStyleSheet("font-size: 17px; font-weight: 700;")
-    root.addWidget(title)
-
-    subtitle = QLabel("Here are the latest updates included in this release:")
-    subtitle.setWordWrap(True)
-    subtitle.setStyleSheet("font-size: 12px; color: #909090;")
-    root.addWidget(subtitle)
-
-    updates_html = "".join(
-        f"<li><b>{name}</b><br><span>{desc}</span></li>"
-        for name, desc in _ANKANG_WHATS_NEW_ITEMS
-    )
-    updates = QLabel(f"<ul style='margin-top: 4px;'>{updates_html}</ul>")
-    updates.setTextFormat(Qt.TextFormat.RichText)
-    updates.setWordWrap(True)
-    updates.setStyleSheet("font-size: 13px;")
-    root.addWidget(updates)
-
-    dont_show = QCheckBox("Don't show again for this update")
-    dont_show.setChecked(True)
-    root.addWidget(dont_show)
-
-    row = QHBoxLayout()
-    row.addStretch(1)
-    close_btn = QPushButton("Close")
-    close_btn.clicked.connect(dlg.accept)
-    row.addWidget(close_btn)
-    root.addLayout(row)
-    dlg.exec()
-    if dont_show.isChecked() or force:
-        state["last_seen_version"] = current
-        save_profile_ui_state(state)
-
-
-def _ankang_show_startup_popups() -> None:
-    _ankang_show_welcome_dialog()
-    _ankang_show_whats_new_dialog()
-
-
-def _ankang_install_menu() -> None:
-    if getattr(mw, "_ankang_menu_installed", False):
-        return
-    menubar = getattr(getattr(mw, "form", None), "menubar", None)
-    if menubar is None:
-        return
-    menu = menubar.addMenu("AnKang")
-    menu.addAction("Toggle Left Sidebar").triggered.connect(_ankang_toggle_left_sidebar)
-    menu.addAction("Toggle Right Sidebar").triggered.connect(_ankang_toggle_right_sidebar)
-    menu.addSeparator()
-    menu.addAction("Help Wiki").triggered.connect(
-        lambda: _ankang_open_url(_ANKANG_HELP_WIKI_URL)
-    )
-    menu.addAction("Welcome Message").triggered.connect(
-        lambda: _ankang_show_welcome_dialog(force=True)
-    )
-    menu.addAction("What's New").triggered.connect(
-        lambda: _ankang_show_whats_new_dialog(force=True)
-    )
-    menu.addSeparator()
-    ver_action = menu.addAction(f"AnKang v{_ankang_manifest_version()}")
-    ver_action.setEnabled(False)
-    mw._ankang_menu_installed = True
 
 
 def _remove_ankang_style_block(ss: str, begin: str, end: str) -> str:
@@ -499,10 +332,10 @@ def setup_ankang_ui():
 
     for delay_ms in (0, 100, 500):
         QTimer.singleShot(delay_ms, _ankang_inject_toolbar_reopen_row)
-    QTimer.singleShot(0, _ankang_install_menu)
+    QTimer.singleShot(0, install_ankang_menu)
     if not getattr(mw, "_ankang_startup_popups_shown", False):
         mw._ankang_startup_popups_shown = True
-        QTimer.singleShot(450, _ankang_show_startup_popups)
+        QTimer.singleShot(450, show_startup_popups)
 
 def _anki_note_and_card_ids_for_webview(webview):
     """If the webview is the reviewer card area, return (note id, card id) for Browser search."""

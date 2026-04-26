@@ -237,8 +237,23 @@ def profile_data_file(filename: str) -> str:
     return os.path.join(profile_data_dir(), filename)
 
 
+def profile_root_file(filename: str) -> str:
+    ensure_addon_data_migrated_for_profile()
+    return os.path.join(_ankang_data_root(), filename)
+
+
 def profile_ui_state_path() -> str:
-    return profile_data_file("ui_state.json")
+    new_path = profile_root_file("ui_state.json")
+    old_path = os.path.join(profile_data_dir(), "ui_state.json")
+    if not os.path.isfile(new_path) and os.path.isfile(old_path):
+        try:
+            shutil.move(old_path, new_path)
+        except OSError:
+            try:
+                shutil.copy2(old_path, new_path)
+            except OSError:
+                pass
+    return new_path
 
 
 def load_profile_ui_state() -> dict:

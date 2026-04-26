@@ -19,6 +19,7 @@ from .countdown import ExamCountdownWidget
 # Support dialog: set AnkiWeb after you publish (e.g. https://ankiweb.net/shared/info/<id>).
 _ANKANG_ANKIWEB_ADDON_URL = "https://ankiweb.net/shared/info/1680917863"
 _ANKANG_KOFI_URL = "https://ko-fi.com/drgkang"
+_ANKANG_ANKIWEB_REVIEW_URL = "https://ankiweb.net/shared/review/1680917863"
 _ANKANG_GITHUB_REPO_URL = "https://github.com/dr-gkang/AnKang"
 
 
@@ -83,13 +84,13 @@ def _ankang_support_dialog(parent: QWidget) -> None:
     root.addWidget(msg)
     row = QHBoxLayout()
     row.addStretch(1)
-    b_anki = QPushButton("Open AnkiWeb")
-    b_kofi = QPushButton("Open Ko-fi")
-    for b in (b_anki, b_kofi):
+    b_rating = QPushButton("Leave a rating!")
+    b_kofi = QPushButton("Donate to support!")
+    for b in (b_rating, b_kofi):
         mark_ankang_text_button(b)
-    b_anki.clicked.connect(lambda: openLink(_ANKANG_ANKIWEB_ADDON_URL))
+    b_rating.clicked.connect(lambda: openLink(_ANKANG_ANKIWEB_REVIEW_URL))
     b_kofi.clicked.connect(lambda: openLink(_ANKANG_KOFI_URL))
-    row.addWidget(b_anki)
+    row.addWidget(b_rating)
     row.addWidget(b_kofi)
     root.addLayout(row)
     dlg.setStyleSheet(ankang_text_button_stylesheet())
