@@ -17,7 +17,8 @@ from .stopwatch import StopwatchWidget
 from .countdown import ExamCountdownWidget
 
 # Support dialog: set AnkiWeb after you publish (e.g. https://ankiweb.net/shared/info/<id>).
-_ANKANG_ANKIWEB_ADDON_URL = "https://ankiweb.net/shared/addons"
+_ANKANG_ANKIWEB_ADDON_URL = "https://ankiweb.net/shared/info/1680917863"
+_ANKANG_KOFI_URL = "https://ko-fi.com/drgkang"
 _ANKANG_GITHUB_REPO_URL = "https://github.com/dr-gkang/AnKang"
 
 
@@ -75,24 +76,21 @@ def _ankang_support_dialog(parent: QWidget) -> None:
     root.setContentsMargins(12, 12, 12, 12)
     root.setSpacing(10)
     msg = QLabel(
-        "Hey guys! Thanks for downloading my addon, the best way to support me is by "
-        "giving a positive rating on AnkiWeb and by starring the repo on GitHub!"
+        "Thanks for downloading AnKang.\n\n"
+        "If you'd like to support development, leaving a rating on AnkiWeb and donating on Ko-fi helps a lot."
     )
     msg.setWordWrap(True)
     root.addWidget(msg)
     row = QHBoxLayout()
     row.addStretch(1)
     b_anki = QPushButton("Open AnkiWeb")
-    b_gh = QPushButton("Open GitHub")
-    b_close = QPushButton("Close")
-    for b in (b_anki, b_gh, b_close):
+    b_kofi = QPushButton("Open Ko-fi")
+    for b in (b_anki, b_kofi):
         mark_ankang_text_button(b)
     b_anki.clicked.connect(lambda: openLink(_ANKANG_ANKIWEB_ADDON_URL))
-    b_gh.clicked.connect(lambda: openLink(_ANKANG_GITHUB_REPO_URL))
-    b_close.clicked.connect(dlg.accept)
+    b_kofi.clicked.connect(lambda: openLink(_ANKANG_KOFI_URL))
     row.addWidget(b_anki)
-    row.addWidget(b_gh)
-    row.addWidget(b_close)
+    row.addWidget(b_kofi)
     root.addLayout(row)
     dlg.setStyleSheet(ankang_text_button_stylesheet())
     dlg.exec()
@@ -105,21 +103,17 @@ def _ankang_feedback_dialog(parent: QWidget) -> None:
     root.setContentsMargins(12, 12, 12, 12)
     root.setSpacing(10)
     msg = QLabel(
-        'Help support the development of AnKang by reporting a bug or giving me ideas '
-        'for a new feature! Both of these are done using the "Issues" tab on the GitHub repo!'
+        "Report a bug or request a feature using the AnKang GitHub Issues page."
     )
     msg.setWordWrap(True)
     root.addWidget(msg)
     row = QHBoxLayout()
     row.addStretch(1)
     b_issues = QPushButton("Open GitHub Issues")
-    b_close = QPushButton("Close")
-    for b in (b_issues, b_close):
+    for b in (b_issues,):
         mark_ankang_text_button(b)
     b_issues.clicked.connect(lambda: openLink(_ankang_github_issues_url()))
-    b_close.clicked.connect(dlg.accept)
     row.addWidget(b_issues)
-    row.addWidget(b_close)
     root.addLayout(row)
     dlg.setStyleSheet(ankang_text_button_stylesheet())
     dlg.exec()

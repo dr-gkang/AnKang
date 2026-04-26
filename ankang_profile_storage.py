@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 
@@ -234,6 +235,36 @@ def _addon_dir_has_ankang_marker(addon_dir: str) -> bool:
 def profile_data_file(filename: str) -> str:
     ensure_addon_data_migrated_for_profile()
     return os.path.join(profile_data_dir(), filename)
+
+
+def profile_ui_state_path() -> str:
+    return profile_data_file("ui_state.json")
+
+
+def load_profile_ui_state() -> dict:
+    path = profile_ui_state_path()
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {}
+
+
+def save_profile_ui_state(state: dict) -> None:
+    if not isinstance(state, dict):
+        return
+    path = profile_ui_state_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, ensure_ascii=True)
+    except OSError:
+        return
 
 
 def ensure_addon_data_migrated_for_profile() -> None:

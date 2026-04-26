@@ -256,13 +256,7 @@ class ExamCountdownConfigDialog(QDialog):
         layout.addWidget(self._list)
         self._refresh_list()
 
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.accept)
-        layout.addWidget(close_btn)
-
-        from .ankang_format_styles import ankang_text_button_stylesheet, mark_ankang_text_button
-
-        mark_ankang_text_button(close_btn)
+        from .ankang_format_styles import ankang_text_button_stylesheet
         self.setStyleSheet(ankang_text_button_stylesheet())
 
     def _row_label(self, i: int) -> str:
