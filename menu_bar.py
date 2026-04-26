@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from aqt import mw
 
+from .filtered_deck_builder import open_step1_v12_builder
 from .startup_popups import (
     ANKANG_HELP_WIKI_URL,
     ankang_manifest_version,
@@ -47,8 +48,16 @@ def install_ankang_menu() -> None:
         lambda: _open_url(ANKANG_HELP_WIKI_URL)
     )
     menu.addSeparator()
-    menu.addAction("Toggle Left Sidebar").triggered.connect(_toggle_left_sidebar)
-    menu.addAction("Toggle Right Sidebar").triggered.connect(_toggle_right_sidebar)
+    menu.addAction("AnKang Filtered Deck Builder").triggered.connect(
+        open_step1_v12_builder
+    )
+    toggle_sidebars_menu = menu.addMenu("Toggle Sidebars")
+    toggle_sidebars_menu.addAction("Left Sidebar").triggered.connect(
+        _toggle_left_sidebar
+    )
+    toggle_sidebars_menu.addAction("Right Sidebar").triggered.connect(
+        _toggle_right_sidebar
+    )
     menu.addSeparator()
     ver_action = menu.addAction(f"AnKang v{ankang_manifest_version()}")
     ver_action.setEnabled(False)
