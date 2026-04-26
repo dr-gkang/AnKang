@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from aqt import mw
+from aqt.qt import QKeySequence, Qt
 
 from .filtered_deck_builder import open_step1_v12_builder
 from .startup_popups import (
@@ -52,12 +53,15 @@ def install_ankang_menu() -> None:
         open_step1_v12_builder
     )
     toggle_sidebars_menu = menu.addMenu("Toggle Sidebars")
-    toggle_sidebars_menu.addAction("Left Sidebar").triggered.connect(
-        _toggle_left_sidebar
-    )
-    toggle_sidebars_menu.addAction("Right Sidebar").triggered.connect(
-        _toggle_right_sidebar
-    )
+    left_action = toggle_sidebars_menu.addAction("Left Sidebar")
+    left_action.triggered.connect(_toggle_left_sidebar)
+    left_action.setShortcut(QKeySequence("Shift+Left"))
+    left_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
+
+    right_action = toggle_sidebars_menu.addAction("Right Sidebar")
+    right_action.triggered.connect(_toggle_right_sidebar)
+    right_action.setShortcut(QKeySequence("Shift+Right"))
+    right_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
     menu.addSeparator()
     ver_action = menu.addAction(f"AnKang v{ankang_manifest_version()}")
     ver_action.setEnabled(False)
